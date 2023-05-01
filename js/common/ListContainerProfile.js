@@ -1,0 +1,397 @@
+'use strict';
+
+var Animated = require('Animated');
+var NativeModules = require('NativeModules');
+var Dimensions = require('Dimensions');
+var BuddyHeader = require('./BuddyHeader');
+var BuddySegmentedControl = require('./BuddySegmentedControl');
+var ParallaxBackground = require('./ParallaxBackground');
+var React = require('React');
+var ReactNative = require('react-native');
+var StyleSheet = require('./BuddyStyleSheet.js');
+var View = require('View');
+var { Text } = require('./BuddyText');
+var ViewPager = require('./ViewPager');
+var Platform = require('Platform');
+
+import type { Item as HeaderItem } from 'BuddyHeader';
+import {Image, Button} from "react-native";
+
+type Props = {
+    title: string;
+    leftItem ? : HeaderItem;
+    rightItem ? : HeaderItem;
+    extraItems ? : Array < HeaderItem > ;
+    selectedSegment ? : number;
+    selectedSectionColor: string;
+    backgroundImage: number;
+    backgroundColor: string;
+    parallaxContent ? : ? ReactElement;
+    stickyHeader ? : ? ReactElement;
+    onSegmentChange ? : (segment: number) => void;
+    children ? : any;
+    profileImage: number;
+    profileMark: string;
+};
+
+type State = {
+    idx: number;
+    anim: Animated.Value;
+    stickyHeaderHeight: number;
+};
+
+const EMPTY_CELL_HEIGHT = Dimensions.get('window').height > 600 ? 200 : 150;
+
+var ActivityIndicator = require('ActivityIndicator');
+var ProgressBarAndroid = require('ProgressBarAndroid');
+
+
+class ListContainerProfile extends React.Component {
+    props: Props;
+    state: State;
+    _refs: Array < any > ;
+    _pinned: any;
+
+    static defaultProps = {
+        selectedSectionColor: 'white',
+    };
+
+    static contextTypes = {
+        openDrawer: React.PropTypes.func,
+        hasUnreadNotifications: React.PropTypes.number,
+    };
+
+    constructor(props: Props) {
+        super(props);
+
+        this.state = {
+            idx: this.props.selectedSegment || 0,
+            anim: new Animated.Value(0),
+            stickyHeaderHeight: 0,
+        };
+
+        (this: any).renderProfileImage = this.renderProfileImage.bind(this);
+        (this: any).renderFakeHeader = this.renderFakeHeader.bind(this);
+        (this: any).handleStickyHeaderLayout = this.handleStickyHeaderLayout.bind(this);
+        (this: any).handleShowMenu = this.handleShowMenu.bind(this);
+        (this: any).handleSelectSegment = this.handleSelectSegment.bind(this);
+        this._refs = [];
+    }
+
+    render() {
+        var leftItem = this.props.leftItem;
+        if (!leftItem && Platform.OS === 'android') {
+            leftItem = {
+                title: 'Menu',
+                icon: this.context.hasUnreadNotifications ? require('./img/hamburger-unread.png') : require('./img/hamburger.png'),
+                onPress: this.handleShowMenu,
+            };
+        }
+
+        const segments = [];
+
+        let { stickyHeader } = this.props;
+        if (segments.length > 1) {
+            stickyHeader = (
+                <View>
+          <BuddySegmentedControl
+            values={segments}
+            selectedIndex={this.state.idx}
+            selectionColor={this.props.selectedSectionColor}
+            onChange={this.handleSelectSegment}
+          />
+          {stickyHeader}
+        </View>
+            );
+        }
+        // TODO: Bind to ViewPager animation
+        const backgroundShift = segments.length === 1 ? 0 : this.state.idx / (segments.length - 1);
+
+        return (
+            <View style={styles.container}>
+        <View style={styles.headerWrapper}>
+          <ParallaxBackground
+            minHeight={this.state.stickyHeaderHeight + BuddyHeader.height }
+            maxHeight={EMPTY_CELL_HEIGHT + BuddyHeader.height }
+            offset={this.state.anim}
+            backgroundImage={this.props.backgroundImage}
+            backgroundShift={backgroundShift}
+            backgroundColor={this.props.backgroundColor}
+            title={this.props.title}>
+            {this.renderParallaxContent()}
+          </ParallaxBackground>
+        </View>
+            <BuddyHeader
+            title={this.props.title}
+            leftItem={leftItem}
+            rightItem={this.props.rightItem}
+            extraItems={this.props.extraItems}>
+            {this.renderHeaderTitle()}
+          </BuddyHeader>
+        <ViewPager
+          count={segments.length}
+          selectedIndex={this.state.idx}
+          onSelectedIndexChange={this.handleSelectSegment}>
+        </ViewPager>
+        {this.renderFloatingStickyHeader(stickyHeader)}
+      </View>
+        );
+    }
+
+    renderProfileImage() {
+        if (!this.props.profileImage) {
+            return null;
+        }
+        console.log("Image4", this.props.profileImage);
+        return (
+            <View style={styles.viewTitle}>
+                <Image size={Dimensions.get('window').width/2.5} source={this.props.profileImage}/>
+            <Text style={styles.headerTitle}>{this.props.title}</Text>
+            </View>
+        );
+    }
+
+    renderParallaxContent() {
+        if (Platform.OS === 'android') {
+            return <View />;
+        }
+        if (this.props.parallaxContent) {
+            return this.props.parallaxContent;
+        }
+        return (
+            <View style={styles.profileLayout}>
+            <View style={styles.profileImage}>
+                {this.renderProfileImage()}
+            </View>
+          </View>
+        );
+    }
+
+        renderHeaderTitle(): ? ReactElement {
+        if (Platform.OS === 'android') {
+            return null;
+        }
+        var transform;
+        if (!this.props.parallaxContent) {
+            var distance = EMPTY_CELL_HEIGHT - this.state.stickyHeaderHeight;
+            transform = {
+                opacity: this.state.anim.interpolate({
+                    inputRange: [distance - 20, distance],
+                    outputRange: [0, 1],
+                    extrapolate: 'clamp',
+                })
+            };
+        }
+        return (
+            <Animated.Text style={[styles.headerTitle, transform]}>
+        {this.props.title}
+      </Animated.Text>
+        );
+    }
+
+    handleScroll(idx: number, e: any) {
+        if (idx !== this.state.idx) {
+            return;
+        }
+        let y = 0;
+        if (Platform.OS === 'ios') {
+            this.state.anim.setValue(e.nativeEvent.contentOffset.y);
+            const height = EMPTY_CELL_HEIGHT - this.state.stickyHeaderHeight;
+            y = Math.min(e.nativeEvent.contentOffset.y, height);
+        }
+        this._refs.forEach((ref, ii) => {
+            if (ii !== idx && ref) {
+                ref.scrollTo && ref.scrollTo({ y, animated: false });
+            }
+        });
+
+    }
+
+    renderFakeHeader() {
+        if (Platform.OS === 'ios') {
+            const height = EMPTY_CELL_HEIGHT + this.state.stickyHeaderHeight/2 ;
+            return (
+                <View style={{height}} />
+            );
+        }
+    }
+
+    renderFixedStickyHeader(stickyHeader: ? ReactElement) {
+        return Platform.OS === 'ios' ? <View style={{height: this.state.stickyHeaderHeight}} /> : stickyHeader;
+    }
+
+    renderFloatingStickyHeader(stickyHeader: ? ReactElement) {
+        if (!stickyHeader || Platform.OS !== 'ios') {
+            return;
+        }
+        var opacity = this.state.stickyHeaderHeight === 0 ? 0 : 1;
+        var transform;
+
+        // If native pinning is not available, fallback to Animated
+        if (!NativeModules.F8Scrolling) {
+            var distance = EMPTY_CELL_HEIGHT - this.state.stickyHeaderHeight;
+            var translateY = this.state.anim.interpolate({
+                inputRange: [0, distance],
+                outputRange: [distance, 0],
+                extrapolateRight: 'clamp',
+            });
+            transform = [{ translateY }];
+        }
+
+        return (
+            <Animated.View
+        ref={(ref) => { this._pinned = ref; }}
+        onLayout={this.handleStickyHeaderLayout}
+        style={[styles.stickyHeader, {opacity}, {transform}]}>
+        {stickyHeader}
+      </Animated.View>
+        );
+    }
+
+    handleStickyHeaderLayout({ nativeEvent: { layout, target } }: any) {
+        this.setState({ stickyHeaderHeight: layout.height });
+    }
+
+    componentWillReceiveProps(nextProps: Props) {
+        if (typeof nextProps.selectedSegment === 'number' &&
+            nextProps.selectedSegment !== this.state.idx) {
+            this.setState({ idx: nextProps.selectedSegment });
+        }
+    }
+
+    componentDidUpdate(prevProps: Props, prevState: State) {
+        if (!NativeModules.F8Scrolling) {
+            return;
+        }
+
+        if (this.state.idx !== prevState.idx ||
+            this.state.stickyHeaderHeight !== prevState.stickyHeaderHeight) {
+            var distance = EMPTY_CELL_HEIGHT - this.state.stickyHeaderHeight;
+
+            if (this._refs[prevState.idx] && this._refs[prevState.idx].getScrollResponder) {
+                const oldScrollViewTag = ReactNative.findNodeHandle(
+                    this._refs[prevState.idx].getScrollResponder()
+                );
+                NativeModules.F8Scrolling.unpin(oldScrollViewTag);
+            }
+
+            if (this._refs[this.state.idx] && this._refs[this.state.idx].getScrollResponder) {
+                const newScrollViewTag = ReactNative.findNodeHandle(
+                    this._refs[this.state.idx].getScrollResponder()
+                );
+                const pinnedViewTag = ReactNative.findNodeHandle(this._pinned);
+                NativeModules.F8Scrolling.pin(newScrollViewTag, pinnedViewTag, distance);
+            }
+        }
+    }
+
+    handleSelectSegment(idx: number) {
+        if (this.state.idx !== idx) {
+            const { onSegmentChange } = this.props;
+            this.setState({ idx }, () => onSegmentChange && onSegmentChange(idx));
+        }
+    }
+
+    handleShowMenu() {
+        this.context.openDrawer();
+    }
+}
+
+var styles = StyleSheet.create({
+    container: {
+        flex: 1,
+        backgroundColor: 'white',
+    },
+    headerWrapper: {
+        android: {
+            elevation: 2,
+            backgroundColor: 'transparent',
+            // FIXME: elevation doesn't seem to work without setting border
+            borderRightWidth: 1,
+            marginRight: -1,
+            borderRightColor: 'transparent',
+        }
+    },
+    listView: {
+        ios: {
+            backgroundColor: 'transparent',
+        },
+        android: {
+            backgroundColor: 'white',
+        }
+    },
+    headerTitle: {
+        color: 'white',
+        fontWeight: 'bold',
+        fontSize: 20,
+        backgroundColor: 'transparent',
+        textAlign: 'center'
+    },
+    parallaxText: {
+        color: 'white',
+        fontSize: 42,
+        fontWeight: 'bold',
+        letterSpacing: -1,
+    },
+    stickyHeader: {
+        position: 'absolute',
+        top: BuddyHeader.height,
+        left: 0,
+        right: 0,
+    },
+    profileImage: {
+        paddingTop: 30,
+        justifyContent: 'center',
+        alignItems: 'center',
+        paddingBottom: 15,
+        flex: 1,
+        width: Dimensions.get('window').width / 2.5,
+        backgroundColor: 'transparent',
+    },
+    profileMark: {
+        justifyContent: 'center',
+        alignItems: 'center',
+        width: Dimensions.get('window').width / 3,
+        backgroundColor: 'transparent',
+        flex: 1,
+    },
+    profileLoyalty: {
+        justifyContent: 'center',
+        alignItems: 'center',
+        width: Dimensions.get('window').width / 3,
+        backgroundColor: 'transparent',
+    },
+    profileSettings: {
+        justifyContent: 'center',
+        alignItems: 'center',
+        width: Dimensions.get('window').width / 3,
+        flex: 2,
+    },
+    profileLoyaltyText: {
+        color: 'white',
+    },
+    profileLayout: {
+        flexDirection: 'row',
+        flex: 0,
+    },
+    rowLoyalty: {
+        flexDirection: 'row'
+    },
+    iconSettings: {
+        color: 'white',
+    },
+    iconLoyalty: {
+        color: 'white',
+        fontSize: 20,
+    },
+    iconUpdate: {
+        color: 'white',
+        fontSize: 20,
+    },
+    viewTitle: {},
+    profileSettings: {
+        alignItems: 'flex-start',
+    }
+});
+
+module.exports = ListContainerProfile;
